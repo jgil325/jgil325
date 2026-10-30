@@ -6,10 +6,12 @@ Install requirements in a virtual environment first. Font outlines keep the
 portfolio's Geist typeface intact when GitHub loads each SVG as an image.
 """
 
-from collections import defaultdict
 from functools import lru_cache
 from html import escape
 from pathlib import Path
+import argparse
+import base64
+import io
 import math
 import ssl
 import urllib.request
@@ -24,7 +26,23 @@ from fontTools.varLib.instancer import instantiateVariableFont
 ROOT = Path(__file__).resolve().parents[1]
 CACHE = ROOT / ".cache"
 ASSETS = ROOT / "assets"
+LOCAL_ASSETS = None
 SOURCE = "https://raw.githubusercontent.com/jgil325/jgil325.github.io/main/assets/"
+# Order, subjects, mirroring, contrast, and timing from the portfolio's
+# src/templates.mjs and src/scene.js. Only the decorative background rotates.
+SCENES = [
+    {"key": "hillside", "subject": (.68, .55), "flip": True},
+    {"key": "open-skies", "subject": (.75, .50), "contrast": .9},
+    {"key": "golden-hour", "subject": (.60, .45), "flip": True},
+    {"key": "snowy-crossing", "subject": (.85, .82)},
+    {"key": "arcane-city", "subject": (.52, .45), "contrast": .8},
+    {"key": "sunlit-study", "subject": (.55, .55), "contrast": .85},
+    {"key": "sleepy-cats", "subject": (.72, .40)},
+]
+DWELL_SECONDS = 8
+RIPPLE_SECONDS = 1.9
+RIPPLE_BANDS = 12
+BAYER = [[0, 48, 12, 60, 3, 51, 15, 63], [32, 16, 44, 28, 35, 19, 47, 31], [8, 56, 4, 52, 11, 59, 7, 55], [40, 24, 36, 20, 43, 27, 39, 23], [2, 50, 14, 62, 1, 49, 13, 61], [34, 18, 46, 30, 33, 17, 45, 29], [10, 58, 6, 54, 9, 57, 5, 53], [42, 26, 38, 22, 41, 25, 37, 21]]
 LOOKS = {
     "light": {"canvas": "#fafafc", "ink": "#17191d", "muted": "#60656f", "accent": "#3159d8", "line": "#dfe2e8"},
     "dark": {"canvas": "#15171b", "ink": "#f4f5f8", "muted": "#adb2be", "accent": "#8ca7ff", "line": "#343842"},
@@ -32,6 +50,8 @@ LOOKS = {
 
 
 def download(relative):
+    if LOCAL_ASSETS is not None and (LOCAL_ASSETS / relative).is_file():
+        return LOCAL_ASSETS / relative
     target = CACHE / relative
     if not target.exists():
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -70,9 +90,15 @@ def smooth(a, b, value):
     return t * t * (3 - 2 * t)
 
 
-def scene(width, height, theme, mobile):
-    """Sample the site's mirrored hillside into a fixed vector dot field."""
-    image = ImageOps.mirror(Image.open(download("scenes/hillside.jpg")).convert("RGB"))
+def scene_texture(width, height, theme, mobile, config):
+    """Embed one color sample per dot; SVG supplies the crisp vector dot mask.
+
+    The scene textures stay small while the vector mask stays sharp at any
+    display density. No artwork is fetched when a visitor loads the banner.
+    """
+    image = Image.open(download(f"scenes/{config['key']}.jpg")).convert("RGB")
+    if config.get("flip"):
+        image = ImageOps.mirror(image)
     iw, ih = image.size
     crop_width = iw
     crop_height = iw * height / width
@@ -82,63 +108,102 @@ def scene(width, height, theme, mobile):
     crop_width /= 1.04
     crop_height /= 1.04
     anchor = (0.50, 0.84) if mobile else (0.73, 0.81)
-    x = min(iw - crop_width, max(0, 0.68 * iw - anchor[0] * crop_width))
-    y = min(ih - crop_height, max(0, 0.55 * ih - anchor[1] * crop_height))
+    subject_x, subject_y = config["subject"]
+    x = min(iw - crop_width, max(0, subject_x * iw - anchor[0] * crop_width))
+    y = min(ih - crop_height, max(0, subject_y * ih - anchor[1] * crop_height))
     pitch = 7 if mobile else 6
     cols, rows = math.ceil(width / pitch), math.ceil(height / pitch)
     sample = image.crop((x, y, x + crop_width, y + crop_height)).resize((cols, rows), Image.Resampling.BOX)
-    # The site's ordered edge dissolve, retained as a vector pattern.
-    bayer = [[0, 48, 12, 60, 3, 51, 15, 63], [32, 16, 44, 28, 35, 19, 47, 31], [8, 56, 4, 52, 11, 59, 7, 55], [40, 24, 36, 20, 43, 27, 39, 23], [2, 50, 14, 62, 1, 49, 13, 61], [34, 18, 46, 30, 33, 17, 45, 29], [10, 58, 6, 54, 9, 57, 5, 53], [42, 26, 38, 22, 41, 25, 37, 21]]
-    groups = defaultdict(lambda: defaultdict(list))
+    texture = Image.new("RGB", (cols, rows))
+    pixels = []
     for row in range(rows):
         for col in range(cols):
-            px, py = (col + .5) * pitch, (row + .5) * pitch
-            keep = 1 - smooth(.80, 1, py / height)
-            if keep <= bayer[row % 8][col % 8] / 64:
-                continue
             rgb = [v / 255 for v in sample.getpixel((col, row))]
+            contrast = config.get("contrast", 1)
+            rgb = [.62 + (value - .62) * contrast for value in rgb]
             if theme == "dark":
                 rgb = [max(0, min(1, value * multiplier)) ** 1.15 for value, multiplier in zip(rgb, (.55, .66, .98))]
             lum = sum(value * factor for value, factor in zip(rgb, (.2126, .7152, .0722)))
             saturation = 1.3 if theme == "dark" else 1.35
             exposure = 1.05 if theme == "dark" else .97
             rgb = [max(0, min(1, (lum + (value - lum) * saturation) * exposure)) for value in rgb]
-            color = "#" + "".join(f"{round(value * 31) * 255 // 31:02x}" for value in rgb)
-            size = ((.25 + .55 * lum ** .9) if theme == "dark" else (.5 + .4 * (1 - lum) ** .9)) * pitch
-            band = min(11, int(math.hypot(1 - px / width, py / height) / math.sqrt(2) * 12))
-            if theme == "dark":
-                radius = round(size * .56, 1)
-                shape = f'M{px - radius:.1f} {py:.1f}a{radius} {radius} 0 1 0 {radius * 2:.1f} 0a{radius} {radius} 0 1 0 {-radius * 2:.1f} 0'
-            else:
-                size = round(size, 1)
-                shape = f'M{px - size / 2:.1f} {py - size / 2:.1f}h{size}v{size}h{-size}z'
-            groups[band][color].append(shape)
-    return "".join(
-        f'<g class="field wave-{band}">' + "".join(f'<path fill="{color}" d="{"".join(paths)}"/>' for color, paths in colors.items()) + "</g>"
-        for band, colors in sorted(groups.items())
-    )
+            pixels.append(tuple(round(value * 255) for value in rgb))
+    texture.putdata(pixels)
+    encoded = io.BytesIO()
+    texture.save(encoded, "WEBP", lossless=True, method=6)
+    return "data:image/webp;base64," + base64.b64encode(encoded.getvalue()).decode("ascii")
+
+
+def dot_mask(width, height, theme, mobile):
+    pitch = 7 if mobile else 6
+    cols, rows = math.ceil(width / pitch), math.ceil(height / pitch)
+    start_row = math.floor(height * .8 / pitch)
+    edge = [f'M0 0h{width}v{start_row * pitch}H0z']
+    for row in range(start_row, rows):
+        keep = 1 - smooth(.80, 1, (row + .5) * pitch / height)
+        for col in range(cols):
+            if keep > BAYER[row % 8][col % 8] / 64:
+                edge.append(f'M{col * pitch} {row * pitch}h{pitch}v{pitch}h{-pitch}z')
+    if theme == "dark":
+        dot = f'<circle cx="{pitch / 2}" cy="{pitch / 2}" r="{pitch * .29}" fill="white"/>'
+    else:
+        dot = f'<rect x="{pitch * .18}" y="{pitch * .18}" width="{pitch * .64}" height="{pitch * .64}" fill="white"/>'
+    return f'''<pattern id="dots" width="{pitch}" height="{pitch}" patternUnits="userSpaceOnUse">{dot}</pattern>
+<clipPath id="edge-dissolve"><path d="{''.join(edge)}"/></clipPath>
+<mask id="dot-mask" maskUnits="userSpaceOnUse" x="0" y="0" width="{width}" height="{height}"><g clip-path="url(#edge-dissolve)"><rect width="{width}" height="{height}" fill="url(#dots)"/></g></mask>'''
+
+
+def ripple_clips(width, height):
+    clips = []
+    diagonal = math.hypot(width, height)
+    for band in range(RIPPLE_BANDS):
+        inner = max(0, diagonal * band / RIPPLE_BANDS - .5)
+        outer = diagonal * (band + 1) / RIPPLE_BANDS + .5
+        def circle(radius):
+            return f'M{width + radius:.2f} 0a{radius:.2f} {radius:.2f} 0 1 0 {-2 * radius:.2f} 0a{radius:.2f} {radius:.2f} 0 1 0 {2 * radius:.2f} 0z'
+        path = circle(outer) + (circle(inner) if inner else "")
+        clips.append(f'<clipPath id="band-{band}"><path clip-rule="evenodd" d="{path}"/></clipPath>')
+    return "".join(clips)
+
+
+def scene_rotation():
+    layers = []
+    for band in range(RIPPLE_BANDS):
+        layers.append(f'<g clip-path="url(#band-{band})">')
+        for index, config in enumerate(SCENES):
+            delay = index * (DWELL_SECONDS + RIPPLE_SECONDS) - RIPPLE_SECONDS + band * (RIPPLE_SECONDS - .25) / (RIPPLE_BANDS - 1)
+            layers.append(f'<use href="#scene-{config["key"]}" class="scene scene-{index}" style="animation-delay:{delay:.3f}s"/>')
+        layers.append('</g>')
+    return "".join(layers)
 
 
 def banner(theme, mobile):
     width, height = (640, 580) if mobile else (1000, 480)
     palette = LOOKS[theme]
     suffix = "mobile-" if mobile else ""
+    cycle = len(SCENES) * (DWELL_SECONDS + RIPPLE_SECONDS)
+    fade_in = .25 / cycle * 100
+    active = 100 / len(SCENES)
+    textures = "".join(f'<image id="scene-{config["key"]}" width="{width}" height="{height}" preserveAspectRatio="none" style="image-rendering:pixelated" href="{scene_texture(width, height, theme, mobile, config)}"/>' for config in SCENES)
     parts = [f'''<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}" role="img" aria-labelledby="title desc">
 <title id="title">Jacob Gil — Good ideas. Real products.</title>
-<desc id="desc">Product Lead at RF Labs. A gently rippling dot-field hillside, matching jgil325.github.io. Animation stops for reduced motion.</desc>
+<desc id="desc">Product Lead at RF Labs. Seven dot-field scenes rotate in the same order as jgil325.github.io, with an eight-second hold and a ripple from the top right. Reduced motion shows a still hillside.</desc>
 <defs>
   <clipPath id="frame"><rect width="{width}" height="{height}" rx="20"/></clipPath>
   <radialGradient id="quiet" cx="50%" cy="38%" r="62%"><stop stop-color="{palette['canvas']}" stop-opacity=".97"/><stop offset=".52" stop-color="{palette['canvas']}" stop-opacity=".88"/><stop offset="1" stop-color="{palette['canvas']}" stop-opacity="0"/></radialGradient>
   <linearGradient id="top" x2="0" y2="1"><stop stop-color="{palette['canvas']}" stop-opacity=".7"/><stop offset="1" stop-color="{palette['canvas']}" stop-opacity="0"/></linearGradient>
+  {ripple_clips(width, height)}
+  {dot_mask(width, height, theme, mobile)}
+  {textures}
 </defs>
 <style>
-  .field {{ animation: ripple 12s ease-in-out infinite; }}
-  @keyframes ripple {{ 0%, 60%, 83%, 100% {{ opacity: 1; }} 70% {{ opacity: .30; }} }}
-  {''.join(f'.wave-{i} {{ animation-delay: {-5 + i * .16:.2f}s; }}' for i in range(12))}
-  @media (prefers-reduced-motion: reduce) {{ .field {{ animation: none; }} }}
+  .scene {{ opacity: 0; animation: show-scene {cycle:.1f}s linear infinite; }}
+  .scene-0 {{ opacity: 1; }}
+  @keyframes show-scene {{ 0% {{ opacity: 0; }} {fade_in:.5f}%, {active:.5f}% {{ opacity: 1; }} {active + fade_in:.5f}%, 100% {{ opacity: 0; }} }}
+  @media (prefers-reduced-motion: reduce) {{ .scene {{ animation: none; opacity: 0; }} .scene-0 {{ opacity: 1; }} }}
 </style>
 <g clip-path="url(#frame)"><rect width="{width}" height="{height}" fill="{palette['canvas']}"/>
-{scene(width, height, theme, mobile)}
+<g mask="url(#dot-mask)">{scene_rotation()}</g>
 <rect width="{width}" height="{height}" fill="url(#quiet)"/>
 <rect width="{width}" height="100" fill="url(#top)"/>
 ''']
@@ -161,7 +226,7 @@ def banner(theme, mobile):
         parts.append(lettering("Real products.", 500, 284, 96, palette["accent"], tracking=-6.2, center=True))
         parts.append(lettering("Product thinking. Interface craft. Systems underneath.", 500, 330, 19, palette["ink"], center=True))
     parts.append("</g></svg>\n")
-    destination = ASSETS / f"hero-{suffix}{theme}.svg"
+    destination = ASSETS / f"hero-cycle-{suffix}{theme}.svg"
     destination.write_text("".join(parts))
     print(f"Built {destination.relative_to(ROOT)} ({destination.stat().st_size:,} bytes)")
 
@@ -183,6 +248,13 @@ def project_previews():
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--portfolio", type=Path, help="Use the source assets in a local portfolio checkout")
+    args = parser.parse_args()
+    if args.portfolio:
+        LOCAL_ASSETS = args.portfolio.resolve() / "assets"
+        if not LOCAL_ASSETS.is_dir():
+            parser.error("The portfolio path must contain its assets directory")
     ASSETS.mkdir(parents=True, exist_ok=True)
     for theme in LOOKS:
         for mobile in (False, True):

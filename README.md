@@ -1,10 +1,10 @@
 <a href="https://jgil325.github.io">
   <picture>
-    <source media="(prefers-color-scheme: dark) and (max-width: 600px)" srcset="./assets/hero-mobile-dark.svg">
-    <source media="(max-width: 600px)" srcset="./assets/hero-mobile-light.svg">
-    <source media="(prefers-color-scheme: dark)" srcset="./assets/hero-dark.svg">
-    <source media="(prefers-color-scheme: light)" srcset="./assets/hero-light.svg">
-    <img src="./assets/hero-light.svg" width="100%" alt="Jacob Gil — Good ideas. Real products. Product Lead at RF Labs. Visit my portfolio.">
+    <source media="(prefers-color-scheme: dark) and (max-width: 600px)" srcset="./assets/hero-cycle-mobile-dark.svg">
+    <source media="(max-width: 600px)" srcset="./assets/hero-cycle-mobile-light.svg">
+    <source media="(prefers-color-scheme: dark)" srcset="./assets/hero-cycle-dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="./assets/hero-cycle-light.svg">
+    <img src="./assets/hero-cycle-light.svg" width="100%" alt="Jacob Gil — Good ideas. Real products. Product Lead at RF Labs. Seven rotating scenes from my portfolio. Visit my portfolio.">
   </picture>
 </a>
 
