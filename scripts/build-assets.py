@@ -90,7 +90,7 @@ def smooth(a, b, value):
     return t * t * (3 - 2 * t)
 
 
-def scene_texture(width, height, theme, mobile, config):
+def scene_texture(width, height, theme, mobile, config, anchor=None):
     """Embed one color sample per dot; SVG supplies the crisp vector dot mask.
 
     The scene textures stay small while the vector mask stays sharp at any
@@ -107,7 +107,8 @@ def scene_texture(width, height, theme, mobile, config):
         crop_width = ih * width / height
     crop_width /= 1.04
     crop_height /= 1.04
-    anchor = (0.50, 0.84) if mobile else (0.73, 0.81)
+    if anchor is None:
+        anchor = (0.50, 0.84) if mobile else (0.73, 0.81)
     subject_x, subject_y = config["subject"]
     x = min(iw - crop_width, max(0, subject_x * iw - anchor[0] * crop_width))
     y = min(ih - crop_height, max(0, subject_y * ih - anchor[1] * crop_height))
@@ -134,13 +135,19 @@ def scene_texture(width, height, theme, mobile, config):
     return "data:image/webp;base64," + base64.b64encode(encoded.getvalue()).decode("ascii")
 
 
-def dot_mask(width, height, theme, mobile):
+def dot_mask(width, height, theme, mobile, fade_top=0, fade_bottom=.2):
     pitch = 7 if mobile else 6
     cols, rows = math.ceil(width / pitch), math.ceil(height / pitch)
-    start_row = math.floor(height * .8 / pitch)
-    edge = [f'M0 0h{width}v{start_row * pitch}H0z']
-    for row in range(start_row, rows):
-        keep = 1 - smooth(.80, 1, (row + .5) * pitch / height)
+    first_full = math.ceil(height * fade_top / pitch)
+    last_full = math.floor(height * (1 - fade_bottom) / pitch)
+    edge = [f'M0 {first_full * pitch}h{width}v{(last_full - first_full) * pitch}H0z']
+    for row in range(rows):
+        if first_full <= row < last_full:
+            continue
+        position = (row + .5) * pitch / height
+        keep_top = smooth(0, fade_top, position) if fade_top else 1
+        keep_bottom = 1 - smooth(1 - fade_bottom, 1, position) if fade_bottom else 1
+        keep = keep_top * keep_bottom
         for col in range(cols):
             if keep > BAYER[row % 8][col % 8] / 64:
                 edge.append(f'M{col * pitch} {row * pitch}h{pitch}v{pitch}h{-pitch}z')
@@ -166,11 +173,11 @@ def ripple_clips(width, height):
     return "".join(clips)
 
 
-def scene_rotation():
+def scene_rotation(scenes=SCENES):
     layers = []
     for band in range(RIPPLE_BANDS):
         layers.append(f'<g clip-path="url(#band-{band})">')
-        for index, config in enumerate(SCENES):
+        for index, config in enumerate(scenes):
             delay = index * (DWELL_SECONDS + RIPPLE_SECONDS) - RIPPLE_SECONDS + band * (RIPPLE_SECONDS - .25) / (RIPPLE_BANDS - 1)
             layers.append(f'<use href="#scene-{config["key"]}" class="scene scene-{index}" style="animation-delay:{delay:.3f}s"/>')
         layers.append('</g>')
@@ -247,6 +254,58 @@ def project_previews():
         background.save(ASSETS / f"{key}.webp", "WEBP", quality=93, method=6)
 
 
+def contact_banner(theme, mobile):
+    width, height = (640, 580) if mobile else (1000, 460)
+    palette = LOOKS[theme]
+    suffix = "mobile-" if mobile else ""
+    start = next(index for index, config in enumerate(SCENES) if config["key"] == "snowy-crossing")
+    scenes = SCENES[start:] + SCENES[:start]
+    anchor = (.5, .75) if mobile else (.72, .55)
+    cycle = len(scenes) * (DWELL_SECONDS + RIPPLE_SECONDS)
+    fade_in, active = .25 / cycle * 100, 100 / len(scenes)
+    textures = "".join(f'<image id="scene-{config["key"]}" width="{width}" height="{height}" preserveAspectRatio="none" style="image-rendering:pixelated" href="{scene_texture(width, height, theme, mobile, config, anchor)}"/>' for config in scenes)
+    parts = [f'''<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}" role="img" aria-labelledby="title desc">
+<title id="title">Have something in mind? Get in touch with Jacob Gil.</title>
+<desc id="desc">The portfolio's contact background, starting with the snowy crossing and rotating through seven dot-field scenes. Email jacobgil325@gmail.com. Reduced motion displays a still snowy scene.</desc>
+<defs>
+  <clipPath id="frame"><rect width="{width}" height="{height}" rx="20"/></clipPath>
+  <linearGradient id="quiet" x1="0" y1="0" x2="1" y2="0"><stop stop-color="{palette['canvas']}" stop-opacity=".94"/><stop offset=".32" stop-color="{palette['canvas']}" stop-opacity=".80"/><stop offset=".72" stop-color="{palette['canvas']}" stop-opacity="0"/></linearGradient>
+  {ripple_clips(width, height)}
+  {dot_mask(width, height, theme, mobile, fade_top=.3, fade_bottom=.3)}
+  {textures}
+</defs>
+<style>
+  .scene {{ opacity: 0; animation: show-scene {cycle:.1f}s linear infinite; }}
+  .scene-0 {{ opacity: 1; }}
+  @keyframes show-scene {{ 0% {{ opacity: 0; }} {fade_in:.5f}%, {active:.5f}% {{ opacity: 1; }} {active + fade_in:.5f}%, 100% {{ opacity: 0; }} }}
+  @media (prefers-reduced-motion: reduce) {{ .scene {{ animation: none; opacity: 0; }} .scene-0 {{ opacity: 1; }} }}
+</style>
+<g clip-path="url(#frame)"><rect width="{width}" height="{height}" fill="{palette['canvas']}"/>
+<g mask="url(#dot-mask)">{scene_rotation(scenes)}</g>
+<rect width="{width}" height="{height}" fill="url(#quiet)"/>
+''']
+    if mobile:
+        parts.append(f'<rect x="38" y="48" width="208" height="48" rx="24" fill="{palette["canvas"]}" stroke="{palette["line"]}"/><circle cx="63" cy="72" r="6" fill="{palette["accent"]}"/>')
+        parts.append(lettering("Get in touch", 81, 80, 24, palette["ink"]))
+        parts.append(lettering("Have something", 38, 205, 76, palette["ink"], tracking=-4.6))
+        parts.append(lettering("in mind?", 38, 285, 76, palette["accent"], tracking=-4.6))
+        parts.append(f'<rect x="38" y="333" width="484" height="72" rx="36" fill="{palette["ink"]}"/>')
+        parts.append(lettering("jacobgil325@gmail.com", 64, 378, 27, palette["canvas"]))
+        parts.append(f'<path d="M477 379l18-18m-15 0h15v15" fill="none" stroke="{palette["canvas"]}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>')
+    else:
+        parts.append(f'<rect x="44" y="47" width="154" height="35" rx="17.5" fill="{palette["canvas"]}" stroke="{palette["line"]}"/><circle cx="62" cy="64.5" r="4" fill="{palette["accent"]}"/>')
+        parts.append(lettering("Get in touch", 76, 70, 17, palette["ink"]))
+        parts.append(lettering("Have something", 44, 190, 84, palette["ink"], tracking=-5.4))
+        parts.append(lettering("in mind?", 44, 275, 84, palette["accent"], tracking=-5.4))
+        parts.append(f'<rect x="44" y="319" width="341" height="54" rx="27" fill="{palette["ink"]}"/>')
+        parts.append(lettering("jacobgil325@gmail.com", 65, 353, 19, palette["canvas"]))
+        parts.append(f'<path d="M351 352l13-13m-11 0h11v11" fill="none" stroke="{palette["canvas"]}" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>')
+    parts.append('</g></svg>\n')
+    destination = ASSETS / f"contact-cycle-{suffix}{theme}.svg"
+    destination.write_text("".join(parts))
+    print(f"Built {destination.relative_to(ROOT)} ({destination.stat().st_size:,} bytes)")
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--portfolio", type=Path, help="Use the source assets in a local portfolio checkout")
@@ -259,5 +318,6 @@ if __name__ == "__main__":
     for theme in LOOKS:
         for mobile in (False, True):
             banner(theme, mobile)
+            contact_banner(theme, mobile)
     project_previews()
     (ASSETS / "OFL.txt").write_bytes(download("fonts/OFL.txt").read_bytes())

@@ -56,4 +56,14 @@ The product decisions. The interface details. The architecture underneath. I car
 
 I lead product and frontend work at RF Labs, pairing interface design with hands-on engineering. Previously, I led engineering for RF Cloud.
 
-**[Have something in mind? ↗](mailto:jacobgil325@gmail.com)** &nbsp; [Resume](https://jgil325.github.io/resume/) &nbsp; · &nbsp; [Explore the full portfolio](https://jgil325.github.io)
+<a href="mailto:jacobgil325@gmail.com">
+  <picture>
+    <source media="(prefers-color-scheme: dark) and (max-width: 600px)" srcset="./assets/contact-cycle-mobile-dark.svg">
+    <source media="(max-width: 600px)" srcset="./assets/contact-cycle-mobile-light.svg">
+    <source media="(prefers-color-scheme: dark)" srcset="./assets/contact-cycle-dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="./assets/contact-cycle-light.svg">
+    <img src="./assets/contact-cycle-light.svg" width="100%" alt="Have something in mind? Get in touch — jacobgil325@gmail.com. Rotating dot-field scenes from my portfolio, starting with the snowy crossing. Email Jacob.">
+  </picture>
+</a>
+
+[jacobgil325@gmail.com](mailto:jacobgil325@gmail.com) &nbsp; · &nbsp; [LinkedIn](https://www.linkedin.com/in/gil-jacob/) &nbsp; · &nbsp; [Resume](https://jgil325.github.io/resume/) &nbsp; · &nbsp; [Portfolio](https://jgil325.github.io)

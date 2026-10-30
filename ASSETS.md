@@ -16,6 +16,8 @@ To read assets directly from a local portfolio checkout, append `--portfolio /pa
 
 The four hero SVGs cover narrow and wide screens in light and dark mode. They rotate through the website’s seven scenes in order: hillside, open skies, golden hour, snowy crossing, arcane city, sunlit study, and sleepy cats. Each holds for eight seconds, followed by a 1.9-second ripple spreading from the top right. The heading stays fixed. Twelve concentric SVG clips stagger a short crossfade across the picture, approximating the website’s dot-by-dot WebGL transition within GitHub’s image context.
 
+The four contact SVGs use the website footer’s composition: left-aligned “Have something in mind?” copy, a linked email call to action, a quiet gradient behind the text, and a dot-field dissolve at both edges. Their rotation begins with the snowy crossing, following the website’s contact section, and uses its desktop and portrait anchors. Reduced motion holds that first snowy scene. Native email, LinkedIn, resume, and portfolio links sit below the banner for selectable text and keyboard access.
+
 Each scene is sampled once per dot and embedded as a small lossless WebP texture. A shared vector mask supplies crisp circular or square dots and an ordered dissolve at the bottom. This keeps the complete seven-scene cycle smaller than repeating every vector dot seven times. Typography, dot masks, and transition clips remain vector shapes. `prefers-reduced-motion: reduce` disables rotation and displays only the first hillside scene. No JavaScript, external fonts, embedded HTML, or network requests run inside the SVGs.
 
 ## Credits
